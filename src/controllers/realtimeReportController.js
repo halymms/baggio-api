@@ -1,5 +1,6 @@
 const ItemData = require('../models/realtimeReportItemData');
 const MonthlyClosingData = require('../models/monthlyClosingData');
+const ManagerCommissionData = require('../models/managerCommissionData');
 
 // Buscar dados de um item para um mês/ano
 exports.getItemData = async (req, res) => {
@@ -66,3 +67,36 @@ exports.upsertClosingData = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// Buscar comissão de gestor para um mês/ano
+exports.getManagerCommission = async (req, res) => {
+  try {
+    const { mes, ano } = req.query;
+    if (!mes || !ano) {
+      return res.status(400).json({ error: 'mes e ano são obrigatórios' });
+    }
+    const data = await ManagerCommissionData.findByMonth(parseInt(mes), parseInt(ano));
+    res.json(data || {});
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Cadastrar/editar comissão de gestor para um mês/ano
+exports.upsertManagerCommission = async (req, res) => {
+  try {
+    const { mes, ano, comissao_gestor, observacao } = req.body;
+    if (!mes || !ano) {
+      return res.status(400).json({ error: 'mes e ano são obrigatórios' });
+    }
+    await ManagerCommissionData.upsert(
+      parseInt(mes),
+      parseInt(ano),
+      { comissao_gestor, observacao }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
