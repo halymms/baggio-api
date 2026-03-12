@@ -6,6 +6,7 @@ const userRoutes = require('./routes/userRoutes');
 const authRoutes = require('./routes/authRoutes');
 const logger = require('./middlewares/logger');
 const properfyRoutes = require('./routes/properfyRoutes');
+const propertyRoutes = require('./routes/propertyRoutes');
 const port = 4000
 
 app.use(cors());
@@ -20,6 +21,7 @@ app.get('/', (request, response) => {
 app.use('/users', userRoutes);
 app.use('/auth', authRoutes);
 app.use('/api', properfyRoutes);
+app.use('/api', propertyRoutes);
 
 app.listen(port, () => {
   console.log(`App running on port ${port}.`)
