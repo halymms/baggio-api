@@ -164,6 +164,79 @@ const transformTerminatedData = (data) => {
     };
 };
 
+const getRemovedPropertyReport = async (req, res) => {
+    try {
+        const body = { ...req.body, page: 1 };
+        const token = await getProperfyToken();
+        if (!token) {
+            return res.status(401).json({ error: 'Login inválido na Properfy' });
+        }
+
+        const firstResponse = await fetch('https://adm.baggioimoveis.com.br/api/property/property/report/list', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+        });
+        const firstResult = await firstResponse.json();
+        const lastPage = firstResult.last_page || 1;
+
+        const requests = [];
+        for (let page = 1; page <= lastPage; page++) {
+            const pageBody = { ...req.body, page };
+            requests.push(
+                fetch('https://adm.baggioimoveis.com.br/api/property/property/report/list', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(pageBody)
+                }).then(res => res.json())
+            );
+        }
+
+        const results = await Promise.all(requests);
+        const allData = results.flatMap(r => r.data || []);
+
+        res.json(transformRemovedData(allData));
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+const transformRemovedData = (data) => {
+    const statusMap = new Map();
+    const terminationReasonMap = new Map();
+    const listingTypeMap = new Map();
+
+    data.forEach((item) => {
+        const status = item.chrTransactionType;
+        if (status) {
+            statusMap.set(status, (statusMap.get(status) ?? 0) + 1);
+        }
+
+        const reason = item.enlistment?.chrTerminationReason;
+        if (reason) {
+            terminationReasonMap.set(reason, (terminationReasonMap.get(reason) ?? 0) + 1);
+        }
+
+        const listingType = item.enlistment?.chrTypeListing;
+        if (listingType) {
+            listingTypeMap.set(listingType, (listingTypeMap.get(listingType) ?? 0) + 1);
+        }
+    });
+
+    return {
+        status: Object.fromEntries(statusMap),
+        terminationReasons: Object.fromEntries(terminationReasonMap),
+        listingTypes: Object.fromEntries(listingTypeMap),
+        data,
+    };
+};
+
 const getRentalContractOptions = async (req, res) => {
     try {
         const token = await getProperfyToken();
@@ -186,4 +259,4 @@ const getRentalContractOptions = async (req, res) => {
     }
 };
 
-module.exports = { getPropertyReportList, getTerminatedContractReport, getRentalContractOptions };
+module.exports = { getPropertyReportList, getTerminatedContractReport, getRemovedPropertyReport, getRentalContractOptions };
