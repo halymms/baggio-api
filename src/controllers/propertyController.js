@@ -1,12 +1,27 @@
 const { getProperfyToken } = require("./properfyController");
 
+const MONTH_NAMES_PT = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
 const getPropertyReportList = async (req, res) => {
     try {
-        const body = { ...req.body, page: 1 };
         const token = await getProperfyToken();
         if (!token) {
             return res.status(401).json({ error: 'Login inválido na Properfy' });
         }
+
+        // Mês atual vindo do frontend
+        const [currentStart, currentEnd] = req.body.dteStart;
+        const currentDate = new Date(currentStart + 'T00:00:00');
+        const currentYear = currentDate.getFullYear();
+        const currentMonth = currentDate.getMonth(); // 0-indexed
+
+        // Calcula o início dos últimos 6 meses (mês atual + 5 anteriores)
+        const pad = (n) => String(n).padStart(2, '0');
+        const sixMonthsAgo = new Date(currentYear, currentMonth - 5, 1);
+        const sixMonthStart = `${sixMonthsAgo.getFullYear()}-${pad(sixMonthsAgo.getMonth() + 1)}-01`;
+
+        const expandedBody = { ...req.body, dteStart: [sixMonthStart, currentEnd], page: 1 };
 
         // Busca a primeira página para descobrir o total de páginas
         const firstResponse = await fetch('https://adm.baggioimoveis.com.br/api/rental/contract/report/list', {
@@ -15,7 +30,7 @@ const getPropertyReportList = async (req, res) => {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(body)
+            body: JSON.stringify(expandedBody)
         });
         const firstResult = await firstResponse.json();
         const lastPage = firstResult.last_page || 1;
@@ -23,7 +38,6 @@ const getPropertyReportList = async (req, res) => {
         // Monta todas as requisições em paralelo
         const requests = [];
         for (let page = 1; page <= lastPage; page++) {
-            const pageBody = { ...req.body, page };
             requests.push(
                 fetch('https://adm.baggioimoveis.com.br/api/rental/contract/report/list', {
                     method: 'POST',
@@ -31,7 +45,7 @@ const getPropertyReportList = async (req, res) => {
                         'Authorization': `Bearer ${token}`,
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(pageBody)
+                    body: JSON.stringify({ ...req.body, dteStart: [sixMonthStart, currentEnd], page })
                 }).then(res => res.json())
             );
         }
@@ -39,9 +53,24 @@ const getPropertyReportList = async (req, res) => {
         const results = await Promise.all(requests);
         const allData = results.flatMap(r => r.data || []);
 
-        formattedData = transformData(allData);
+        // Stats (contractType, districts, guarantees, pcf, readjustments) apenas do mês atual
+        const currentMonthData = allData.filter(item =>
+            item.dteStart && item.dteStart >= currentStart && item.dteStart <= currentEnd
+        );
+        const formattedData = transformData(currentMonthData);
 
-        res.json(formattedData);
+        // Últimos 6 meses: do mais antigo ao mais recente
+        const lastMonths = [];
+        for (let i = 5; i >= 0; i--) {
+            const d = new Date(currentYear, currentMonth - i, 1);
+            const monthKey = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+            const contractsAmount = allData.filter(item =>
+                item.dteStart && item.dteStart.slice(0, 7) === monthKey
+            ).length;
+            lastMonths.push({ month: MONTH_NAMES_PT[d.getMonth()], contractsAmount });
+        }
+
+        res.json({ ...formattedData, lastMonths });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -144,6 +173,7 @@ const getTerminatedContractReport = async (req, res) => {
 const transformTerminatedData = (data) => {
     const terminationReasonMap = new Map();
     const guaranteesMap = new Map();
+    const contractTypeMap = new Map();
 
     data.forEach((item) => {
         const reason = item.chrTerminationReason;
@@ -155,11 +185,17 @@ const transformTerminatedData = (data) => {
         if (guarantee) {
             guaranteesMap.set(guarantee, (guaranteesMap.get(guarantee) ?? 0) + 1);
         }
+
+        const contractType = item.chrContractType;
+        if (contractType) {
+            contractTypeMap.set(contractType, (contractTypeMap.get(contractType) ?? 0) + 1);
+        }
     });
 
     return {
         terminationReasons: Object.fromEntries(terminationReasonMap),
         guarantees: Object.fromEntries(guaranteesMap),
+        contractType: Object.fromEntries(contractTypeMap),
         data,
     };
 };
