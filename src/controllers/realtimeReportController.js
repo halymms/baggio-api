@@ -1,6 +1,7 @@
 const ItemData = require('../models/realtimeReportItemData');
 const MonthlyClosingData = require('../models/monthlyClosingData');
 const ManagerCommissionData = require('../models/managerCommissionData');
+const InnovationFundData = require('../models/innovationFundData');
 
 // Buscar dados de um item para um mês/ano
 exports.getItemData = async (req, res) => {
@@ -100,3 +101,34 @@ exports.upsertManagerCommission = async (req, res) => {
   }
 };
 
+// Buscar fundo de inovação para um mês/ano
+exports.getInnovationFund = async (req, res) => {
+  try {
+    const { mes, ano } = req.query;
+    if (!mes || !ano) {
+      return res.status(400).json({ error: 'mes e ano são obrigatórios' });
+    }
+    const data = await InnovationFundData.findByMonth(parseInt(mes), parseInt(ano));
+    res.json(data || {});
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Cadastrar/editar fundo de inovação para um mês/ano
+exports.upsertInnovationFund = async (req, res) => {
+  try {
+    const { mes, ano, fundo_inovacao, observacao } = req.body;
+    if (!mes || !ano) {
+      return res.status(400).json({ error: 'mes e ano são obrigatórios' });
+    }
+    await InnovationFundData.upsert(
+      parseInt(mes),
+      parseInt(ano),
+      { fundo_inovacao, observacao }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
