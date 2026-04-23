@@ -246,7 +246,7 @@ const getRemovedPropertyReport = async (req, res) => {
 const transformRemovedData = (data) => {
     const statusMap = new Map();
     const terminationReasonMap = new Map();
-    const listingTypeMap = new Map();
+    const purposesMap = new Map();
 
     data.forEach((item) => {
         const status = item.chrTransactionType;
@@ -259,18 +259,108 @@ const transformRemovedData = (data) => {
             terminationReasonMap.set(reason, (terminationReasonMap.get(reason) ?? 0) + 1);
         }
 
-        const listingType = item.enlistment?.chrTypeListing;
-        if (listingType) {
-            listingTypeMap.set(listingType, (listingTypeMap.get(listingType) ?? 0) + 1);
+        const purpose = item.chrPurpose;
+        if (purpose) {
+            purposesMap.set(purpose, (purposesMap.get(purpose) ?? 0) + 1);
         }
     });
+
+    const purposes = Object.fromEntries(purposesMap);
+    purposes.TOTAL = Object.values(purposes).reduce((acc, v) => acc + v, 0);
 
     return {
         status: Object.fromEntries(statusMap),
         terminationReasons: Object.fromEntries(terminationReasonMap),
-        listingTypes: Object.fromEntries(listingTypeMap),
+        purposes,
         data,
     };
+};
+
+const getAdvertisedPropertyReport = async (req, res) => {
+    try {
+        const token = await getProperfyToken();
+        if (!token) {
+            return res.status(401).json({ error: 'Login inválido na Properfy' });
+        }
+
+        const { dteNewListing } = req.body;
+        const body = {
+            activeContract: [],
+            chrStatus: ['LISTED'],
+            dteNewListing,
+            page: 1,
+        };
+
+        const firstResponse = await fetch('https://adm.baggioimoveis.com.br/api/property/property/report/list', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+        });
+        const firstResult = await firstResponse.json();
+        const lastPage = firstResult.last_page || 1;
+
+        const requests = [];
+        for (let page = 2; page <= lastPage; page++) {
+            requests.push(
+                fetch('https://adm.baggioimoveis.com.br/api/property/property/report/list', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ ...body, page }),
+                }).then(r => r.json())
+            );
+        }
+
+        const otherResults = await Promise.all(requests);
+        const allData = [firstResult, ...otherResults].flatMap(r => r.data || []);
+
+        const pad = (n) => String(n).padStart(2, '0');
+        const startDate = new Date(dteNewListing[0] + 'T00:00:00');
+        const endDate = new Date(dteNewListing[1] + 'T00:00:00');
+
+        const lastMonths = [];
+        const d = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+        while (d <= endDate) {
+            const monthKey = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+            const contractsAmount = allData.filter(item =>
+                item.dtePublication && item.dtePublication.slice(0, 7) === monthKey
+            ).length;
+            lastMonths.push({ month: MONTH_NAMES_PT[d.getMonth()], contractsAmount });
+            d.setMonth(d.getMonth() + 1);
+        }
+
+        // Filtra somente o mês atual para purposes
+        const now = new Date();
+        const currentMonthKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+        const currentMonthData = allData.filter(item =>
+            item.dtePublication && item.dtePublication.slice(0, 7) === currentMonthKey
+        );
+
+        const purposesMap = new Map();
+        currentMonthData.forEach(item => {
+            const purpose = item.chrPurpose;
+            if (!purpose) return;
+            const entry = purposesMap.get(purpose) || { amount: 0, value: 0 };
+            entry.amount++;
+            entry.value += item.dcmRentRawValue || 0;
+            purposesMap.set(purpose, entry);
+        });
+        const purposes = Object.fromEntries(purposesMap);
+
+        purposes.TOTAL = Object.values(purposes).reduce(
+            (acc, p) => ({ amount: acc.amount + p.amount, value: acc.value + p.value }),
+            { amount: 0, value: 0 }
+        );
+
+        res.json({ lastMonths, purposes });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 };
 
 const getRentalContractOptions = async (req, res) => {
@@ -295,4 +385,4 @@ const getRentalContractOptions = async (req, res) => {
     }
 };
 
-module.exports = { getPropertyReportList, getTerminatedContractReport, getRemovedPropertyReport, getRentalContractOptions };
+module.exports = { getPropertyReportList, getTerminatedContractReport, getRemovedPropertyReport, getRentalContractOptions, getAdvertisedPropertyReport };
