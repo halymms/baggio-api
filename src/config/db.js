@@ -1,12 +1,12 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-// No Render, DATABASE_URL é injetado automaticamente.
-// Em desenvolvimento local, usamos as variáveis individuais do .env.
+// Supabase/produção: DATABASE_URL com SSL (direct, transaction ou session pooler).
+// Desenvolvimento local: variáveis DB_* individuais.
 const pool = process.env.DATABASE_URL
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false }, // necessário para conexões SSL do Render
+      ssl: { rejectUnauthorized: false },
     })
   : new Pool({
       user: process.env.DB_USER,

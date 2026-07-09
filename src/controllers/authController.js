@@ -4,16 +4,24 @@ const bcrypt = require('bcryptjs');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
+const validRoles = ['admin', 'editor', 'viewer'];
+
 const register = async (req, res) => {
   try {
     const { name, email, password, role = 'viewer' } = req.body;
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Name, email and password are required' });
     }
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = await userModel.createUserWithPassword(name, email, hashedPassword, role);
+    const newUser = await userModel.createUser(name, email, hashedPassword, role);
     res.status(201).json(newUser);
   } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Email já cadastrado' });
+    }
     res.status(500).json({ error: error.message });
   }
 };

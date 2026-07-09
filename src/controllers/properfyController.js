@@ -167,4 +167,11 @@ const properfyLogin = async (req, res) => {
   }
 };
 
-module.exports = { properfyLogin, getProperfyRealTimeReport, getProperfyCollectTransaction, getProperfyOpenFinancialStatement, getProperfyOpenFinancialStatementAllPages };
+module.exports = {
+  properfyLogin,
+  getProperfyRealTimeReport,
+  getProperfyCollectTransaction,
+  getProperfyOpenFinancialStatement,
+  getProperfyOpenFinancialStatementAllPages,
+  getProperfyToken,
+};

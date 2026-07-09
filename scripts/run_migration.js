@@ -5,6 +5,11 @@ const pool = require('../src/config/db');
 // Ordem importa: users deve ser criado antes de tabelas que dependam dele
 const migrationFiles = [
   'create_users.sql',
+  'alter_users_role_default.sql',
+  'add_created_at_to_users.sql',
+  'alter_users_password_length.sql',
+  'alter_users_column_lengths.sql',
+  'add_users_email_unique.sql',
   'create_innovation_fund_data.sql',
   'create_manager_commission_data.sql',
   'create_monthly_closing_data.sql',

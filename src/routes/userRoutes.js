@@ -4,8 +4,8 @@ const userController = require('../controllers/userController');
 const { checkRole } = require('../middlewares/auth');
 const jwtAuth = require('../middlewares/jwtAuth');
 
-router.get('/', jwtAuth, userController.getUsers);
-router.get('/:id', jwtAuth, userController.getUserById);
+router.get('/', jwtAuth, checkRole(['admin']), userController.getUsers);
+router.get('/:id', jwtAuth, checkRole(['admin']), userController.getUserById);
 router.post('/', jwtAuth, checkRole(['admin']), userController.createUser);
 router.put('/:id', jwtAuth, checkRole(['admin', 'editor']), userController.updateUser);
 router.delete('/:id', jwtAuth, checkRole(['admin']), userController.deleteUser);
