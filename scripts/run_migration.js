@@ -1,6 +1,24 @@
 const fs = require('fs');
 const path = require('path');
-const pool = require('../src/config/db');
+const { Pool } = require('pg');
+require('dotenv').config();
+
+// Preferir Direct URL para DDL (Supabase). Em hosts só-IPv4 (Railway),
+// use Session/Transaction pooler em DATABASE_URL e rode migrations localmente.
+const connectionString = process.env.DATABASE_DIRECT_URL || process.env.DATABASE_URL;
+
+const pool = connectionString
+  ? new Pool({
+      connectionString,
+      ssl: { rejectUnauthorized: false },
+    })
+  : new Pool({
+      user: process.env.DB_USER,
+      host: process.env.DB_HOST,
+      database: process.env.DB_NAME,
+      password: process.env.DB_PASS,
+      port: process.env.DB_PORT,
+    });
 
 // Ordem importa: users deve ser criado antes de tabelas que dependam dele
 const migrationFiles = [
@@ -14,10 +32,18 @@ const migrationFiles = [
   'create_manager_commission_data.sql',
   'create_monthly_closing_data.sql',
   'create_realtime_report_item_data.sql',
-  // 'add_mes_ano_to_realtime_report_item_data.sql', // ignorado: já incluso no CREATE TABLE acima
+  // 'add_mes_ano_to_realtime_report_item_data.sql', // já incluso no CREATE TABLE acima
 ];
 
 async function runMigrations() {
+  const mode = process.env.DATABASE_DIRECT_URL
+    ? 'DATABASE_DIRECT_URL'
+    : process.env.DATABASE_URL
+      ? 'DATABASE_URL'
+      : 'DB_* local';
+
+  console.log(`Conectando via ${mode}...\n`);
+
   const migrationsDir = path.join(__dirname, '../db/migrations');
 
   for (const file of migrationFiles) {
@@ -35,12 +61,13 @@ async function runMigrations() {
       console.log(`  [OK]   ${file}`);
     } catch (error) {
       console.error(`  [ERRO] ${file}:`, error.message);
-      process.exit(1); // Para na primeira falha
+      await pool.end();
+      process.exit(1);
     }
   }
 
   console.log('\nTodas as migrations executadas com sucesso!');
-  pool.end();
+  await pool.end();
 }
 
 runMigrations();

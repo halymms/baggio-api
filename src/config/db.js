@@ -1,8 +1,9 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-// Supabase/produção: DATABASE_URL com SSL (direct, transaction ou session pooler).
-// Desenvolvimento local: variáveis DB_* individuais.
+// Produção (Railway): DATABASE_URL = Shared Pooler IPv4 (*.pooler.supabase.com).
+// Migrations locais: preferir DATABASE_DIRECT_URL (db.*.supabase.co:5432) no script.
+// Desenvolvimento local sem URL: variáveis DB_* individuais.
 const pool = process.env.DATABASE_URL
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
