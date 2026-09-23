@@ -30,9 +30,12 @@ const migrationFiles = [
   'add_users_email_unique.sql',
   'create_innovation_fund_data.sql',
   'create_manager_commission_data.sql',
+  'add_section_to_manager_commission_data.sql',
   'create_monthly_closing_data.sql',
   'create_realtime_report_item_data.sql',
   // 'add_mes_ano_to_realtime_report_item_data.sql', // já incluso no CREATE TABLE acima
+  'create_inadimplencia_data.sql',
+  'create_inadimplencia_fechamento.sql',
 ];
 
 async function runMigrations() {

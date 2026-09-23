@@ -69,31 +69,47 @@ exports.upsertClosingData = async (req, res) => {
   }
 };
 
-// Buscar comissão de gestor para um mês/ano
+function parseMesAno(mes, ano) {
+  if (mes == null || mes === '' || ano == null || ano === '') {
+    return null;
+  }
+  const mesNum = parseInt(mes, 10);
+  const anoNum = parseInt(ano, 10);
+  if (Number.isNaN(mesNum) || Number.isNaN(anoNum)) {
+    return null;
+  }
+  return { mesNum, anoNum };
+}
+
+// Buscar comissão de gestor para um mês/ano/seção (1 locação, 2 vendas)
 exports.getManagerCommission = async (req, res) => {
   try {
-    const { mes, ano } = req.query;
-    if (!mes || !ano) {
+    const { mes, ano, section } = req.query;
+    const parsed = parseMesAno(mes, ano);
+    if (!parsed) {
       return res.status(400).json({ error: 'mes e ano são obrigatórios' });
     }
-    const data = await ManagerCommissionData.findByMonth(parseInt(mes), parseInt(ano));
+    const sectionNum = section != null ? parseInt(section) : 2;
+    const data = await ManagerCommissionData.findByMonth(parsed.mesNum, parsed.anoNum, sectionNum);
     res.json(data || {});
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-// Cadastrar/editar comissão de gestor para um mês/ano
+// Cadastrar/editar comissão de gestor para um mês/ano/seção
 exports.upsertManagerCommission = async (req, res) => {
   try {
-    const { mes, ano, comissao_gestor, observacao } = req.body;
-    if (!mes || !ano) {
+    const { mes, ano, comissao_gestor, observacao, section } = req.body;
+    const parsed = parseMesAno(mes, ano);
+    if (!parsed) {
       return res.status(400).json({ error: 'mes e ano são obrigatórios' });
     }
+    const sectionNum = section != null ? parseInt(section) : 2;
     await ManagerCommissionData.upsert(
-      parseInt(mes),
-      parseInt(ano),
-      { comissao_gestor, observacao }
+      parsed.mesNum,
+      parsed.anoNum,
+      { comissao_gestor, observacao, section: sectionNum }
     );
     res.json({ success: true });
   } catch (error) {

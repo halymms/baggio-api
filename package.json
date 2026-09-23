@@ -8,6 +8,9 @@
     "dev": "nodemon src/server.js",
     "db:seed:user": "node scripts/create_default_user.js",
     "db:migrate": "node scripts/run_migration.js",
+    "db:sync:inadimplencia": "node scripts/sync_inadimplencia.js",
+    "db:sync:inadimplencia:dia1": "node scripts/sync_inadimplencia_dia1.js",
+    "db:sync:inadimplencia:dia16": "node scripts/sync_inadimplencia_dia16.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
