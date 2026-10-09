@@ -122,7 +122,7 @@ const getCashFlow = async (req, res) => {
 
     const token = await getProperfyToken();
     if (!token) {
-      return res.status(401).json({ error: 'Login inválido na Properfy' });
+      return res.status(502).json({ error: 'Login inválido na Properfy' });
     }
 
     const avisos = [];
