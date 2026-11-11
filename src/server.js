@@ -37,4 +37,13 @@ app.use((err, req, res, next) => {
 
 app.listen(port, '0.0.0.0', () => {
   console.log(`App running on port ${port}.`);
+  const { loadCashFlowPeriodos } = require('./services/cashFlowPeriods');
+  loadCashFlowPeriodos()
+    .then((payload) => {
+      const anos = payload.periodos.map((periodo) => periodo.ano).join(', ');
+      console.log(`Períodos de fluxo de caixa disponíveis: ${anos}`);
+    })
+    .catch((error) => {
+      console.error('Falha ao carregar períodos de fluxo de caixa:', error.message);
+    });
 });

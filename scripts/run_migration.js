@@ -29,6 +29,7 @@ const migrationFiles = [
   'alter_users_column_lengths.sql',
   'add_users_email_unique.sql',
   'create_innovation_fund_data.sql',
+  'add_section_to_innovation_fund_data.sql',
   'create_manager_commission_data.sql',
   'add_section_to_manager_commission_data.sql',
   'create_monthly_closing_data.sql',

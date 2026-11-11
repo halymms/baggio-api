@@ -1,12 +1,10 @@
 const fetch = require('node-fetch');
 const { WALLETS } = require('../config/wallets');
 const { getProperfyToken } = require('./properfyController');
+const { aggregateCashFlow } = require('../services/cashFlowAggregate');
+const { loadCashFlowPeriodos } = require('../services/cashFlowPeriods');
 
 const PROPERFY_BASE = 'https://adm.baggioimoveis.com.br/api';
-
-const round2 = (n) => Math.round(n * 100) / 100;
-
-const toDateKey = (isoDate) => (isoDate || '').slice(0, 10);
 
 const getMonthRange = (mes, ano) => {
   const m = Number(mes);
@@ -38,67 +36,17 @@ const fetchCollect = async (token, fkWallet, start, end) => {
   return response.json();
 };
 
-const aggregateCashFlow = (walletResults, range) => {
-  const dailyTotals = {};
-  let totalEntradas = 0;
-  let totalSaidas = 0;
-  let totalGeral = 0;
-
-  const bancos = walletResults.map(({ wallet, data }) => {
-    let bancoTotal = 0;
-
-    for (const day of data || []) {
-      const dateKey = toDateKey(day.date);
-      const dayTotal = Number(day.total) || 0;
-
-      dailyTotals[dateKey] = (dailyTotals[dateKey] || 0) + dayTotal;
-      bancoTotal += dayTotal;
-      totalGeral += dayTotal;
-
-      for (const item of day.items || []) {
-        const amount = Number(item.amount) || 0;
-        if (amount > 0) totalEntradas += amount;
-        else if (amount < 0) totalSaidas += Math.abs(amount);
-      }
-    }
-
-    return {
-      fkWallet: wallet.id,
-      nome: wallet.nome,
-      totalGeral: round2(bancoTotal),
-    };
-  });
-
-  const grafico = [];
-  const [anoStr, mesStr] = range.inicio.split('-');
-  for (let dia = 1; dia <= range.daysInMonth; dia++) {
-    const data = `${anoStr}-${mesStr}-${String(dia).padStart(2, '0')}`;
-    grafico.push({
-      dia,
-      data,
-      valor: round2(dailyTotals[data] || 0),
-    });
-  }
-
-  return {
-    periodo: {
-      mes: range.mes,
-      ano: range.ano,
-      inicio: range.inicio,
-      fim: range.fim,
-    },
-    cards: {
-      totalGeral: round2(totalGeral),
-      totalEntradas: round2(totalEntradas),
-      totalSaidas: round2(totalSaidas),
-    },
-    grafico,
-    bancos,
-  };
-};
-
 const getWallets = (req, res) => {
   res.json(WALLETS);
+};
+
+const getCashFlowPeriodos = async (req, res) => {
+  try {
+    const payload = await loadCashFlowPeriodos();
+    res.json(payload);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 };
 
 const getCashFlow = async (req, res) => {
@@ -129,17 +77,17 @@ const getCashFlow = async (req, res) => {
     const results = await Promise.all(
       wallets.map(async (wallet) => {
         try {
-          const data = await fetchCollect(token, wallet.id, range.start, range.end);
-          return { wallet, data: data.data || [] };
-        } catch (err) {
-          avisos.push({ fkWallet: wallet.id, nome: wallet.nome, erro: err.message });
-          return { wallet, data: [] };
+          const collect = await fetchCollect(token, wallet.id, range.start, range.end);
+          return { wallet, collect };
+        } catch {
+          avisos.push(`${wallet.nome}: não foi possível carregar o saldo.`);
+          return { wallet, collect: { balance: null, data: [] } };
         }
       })
     );
 
     const payload = aggregateCashFlow(results, range);
-    if (avisos.length > 0) payload.avisos = avisos;
+    payload.avisos = avisos;
 
     res.json(payload);
   } catch (error) {
@@ -147,4 +95,4 @@ const getCashFlow = async (req, res) => {
   }
 };
 
-module.exports = { getCashFlow, getWallets };
+module.exports = { getCashFlow, getCashFlowPeriodos, getWallets };

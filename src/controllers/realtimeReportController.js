@@ -117,31 +117,35 @@ exports.upsertManagerCommission = async (req, res) => {
   }
 };
 
-// Buscar fundo de inovação para um mês/ano
+// Buscar fundo de inovação para um mês/ano/seção (1 locação, 2 vendas)
 exports.getInnovationFund = async (req, res) => {
   try {
-    const { mes, ano } = req.query;
-    if (!mes || !ano) {
+    const { mes, ano, section } = req.query;
+    const parsed = parseMesAno(mes, ano);
+    if (!parsed) {
       return res.status(400).json({ error: 'mes e ano são obrigatórios' });
     }
-    const data = await InnovationFundData.findByMonth(parseInt(mes), parseInt(ano));
+    const sectionNum = section != null && section !== '' ? parseInt(section, 10) : 2;
+    const data = await InnovationFundData.findByMonth(parsed.mesNum, parsed.anoNum, sectionNum);
     res.json(data || {});
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-// Cadastrar/editar fundo de inovação para um mês/ano
+// Cadastrar/editar fundo de inovação para um mês/ano/seção
 exports.upsertInnovationFund = async (req, res) => {
   try {
-    const { mes, ano, fundo_inovacao, observacao } = req.body;
-    if (!mes || !ano) {
+    const { mes, ano, fundo_inovacao, observacao, section } = req.body;
+    const parsed = parseMesAno(mes, ano);
+    if (!parsed) {
       return res.status(400).json({ error: 'mes e ano são obrigatórios' });
     }
+    const sectionNum = section != null && section !== '' ? parseInt(section, 10) : 2;
     await InnovationFundData.upsert(
-      parseInt(mes),
-      parseInt(ano),
-      { fundo_inovacao, observacao }
+      parsed.mesNum,
+      parsed.anoNum,
+      { fundo_inovacao, observacao, section: sectionNum }
     );
     res.json({ success: true });
   } catch (error) {

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { properfyLogin, getProperfyRealTimeReport, getProperfyCollectTransaction, getProperfyOpenFinancialStatement, getProperfyOpenFinancialStatementAllPages, getProperfyOpenFinancialStatementDelinquency } = require('../controllers/properfyController');
-const { getCashFlow, getWallets } = require('../controllers/cashFlowController');
+const { getCashFlow, getCashFlowPeriodos, getWallets } = require('../controllers/cashFlowController');
 const { getItemData, upsertItemData, getClosingData, upsertClosingData, getManagerCommission, upsertManagerCommission, getInnovationFund, upsertInnovationFund } = require('../controllers/realtimeReportController');
 const { getReferencias, getInadimplencia, getFechamentos, getPagos, getAbertos, syncInadimplenciaHandler, syncReferenciaHandler, patchAbertoAtualizado, capturePagoDia1Handler, captureAbertoDia16Handler } = require('../controllers/inadimplenciaController');
 // Rotas para dados de planejado do item
@@ -24,6 +24,7 @@ router.put('/properfy/manager-commission', upsertManagerCommission);
 router.post('/properfy/login', properfyLogin);
 router.post('/properfy/real-time-report', getProperfyRealTimeReport);
 router.get('/properfy/collect-transaction', getProperfyCollectTransaction);
+router.get('/properfy/cash-flow/periodos', getCashFlowPeriodos);
 router.get('/properfy/cash-flow', getCashFlow);
 router.get('/properfy/wallets', getWallets);
 router.post('/properfy/open-financial-statement', getProperfyOpenFinancialStatement);
