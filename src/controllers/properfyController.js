@@ -158,7 +158,7 @@ const getProperfyToken = async () => {
 
 const getProperfyRealTimeReport = async (req, res) => {
   try {
-  const { section = null, companies, dteRange } = req.body;
+    const { section = null, companies, dteRange } = req.body;
     const token = await getProperfyToken();
     if (!token) {
       return res.status(502).json({ error: 'Login inválido na Properfy' });
@@ -192,7 +192,7 @@ const getProperfyRealTimeReport = async (req, res) => {
       receitas = items.slice(0, splitIdx);
       despesas = items.slice(splitIdx);
     }
-  res.status(200).json({ receitas, despesas, original: items });
+    res.status(200).json({ receitas, despesas, original: items });
   } catch (error) {
     console.error('Erro na função getProperfyRealTimeReport:', error);
     res.status(500).json({

@@ -1,0 +1,648 @@
+const { getProperfyToken } = require("./properfyController");
+
+const MONTH_NAMES_PT = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+const pad = (n) => String(n).padStart(2, '0');
+
+// Valor líquido do aluguel (valor bruto menos o desconto percentual)
+const netRentValue = (item) =>
+    (Number(item.dcmRentRawValue) || 0) * (1 - (Number(item.dcmRentPercentDiscount) || 0) / 100);
+
+const monthRange = (month, year) => {
+    const lastDay = new Date(year, month, 0).getDate();
+    return [`${year}-${pad(month)}-01`, `${year}-${pad(month)}-${pad(lastDay)}`];
+};
+
+const fetchProperfy = (token, path, body) => fetch(`https://adm.baggioimoveis.com.br${path}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+}).then(r => r.json());
+
+const fetchAllPages = async (token, path, body) => {
+    const first = await fetchProperfy(token, path, { ...body, page: 1 });
+    const lastPage = first.last_page || 1;
+    if (lastPage <= 1) return first.data || [];
+    const rest = await Promise.all(
+        Array.from({ length: lastPage - 1 }, (_, i) =>
+            fetchProperfy(token, path, { ...body, page: i + 2 })
+        )
+    );
+    return [first, ...rest].flatMap(r => r.data || []);
+};
+
+const fetchTotal = async (token, path, body) => {
+    const first = await fetchProperfy(token, path, { ...body, page: 1 });
+    if (typeof first.total === 'number') return first.total;
+    const lastPage = first.last_page || 1;
+    if (lastPage <= 1) return (first.data || []).length;
+    const last = await fetchProperfy(token, path, { ...body, page: lastPage });
+    const perPage = first.per_page || (first.data || []).length || 0;
+    return (lastPage - 1) * perPage + ((last.data || []).length);
+};
+
+const getPropertyReportList = async (req, res) => {
+    try {
+        const token = await getProperfyToken();
+        if (!token) {
+            return res.status(401).json({ error: 'Login inválido na Properfy' });
+        }
+
+        // Mês atual vindo do frontend
+        const [currentStart, currentEnd] = req.body.dteStart;
+        const currentDate = new Date(currentStart + 'T00:00:00');
+        const currentYear = currentDate.getFullYear();
+        const currentMonth = currentDate.getMonth(); // 0-indexed
+
+        // Calcula o início dos últimos 6 meses (mês atual + 5 anteriores)
+        const pad = (n) => String(n).padStart(2, '0');
+        const sixMonthsAgo = new Date(currentYear, currentMonth - 5, 1);
+        const sixMonthStart = `${sixMonthsAgo.getFullYear()}-${pad(sixMonthsAgo.getMonth() + 1)}-01`;
+
+        const expandedBody = { ...req.body, dteStart: [sixMonthStart, currentEnd], page: 1 };
+
+        // Busca a primeira página para descobrir o total de páginas
+        const firstResponse = await fetch('https://adm.baggioimoveis.com.br/api/rental/contract/report/list', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(expandedBody)
+        });
+        const firstResult = await firstResponse.json();
+        const lastPage = firstResult.last_page || 1;
+
+        // Monta todas as requisições em paralelo
+        const requests = [];
+        for (let page = 1; page <= lastPage; page++) {
+            requests.push(
+                fetch('https://adm.baggioimoveis.com.br/api/rental/contract/report/list', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ ...req.body, dteStart: [sixMonthStart, currentEnd], page })
+                }).then(res => res.json())
+            );
+        }
+
+        const results = await Promise.all(requests);
+        const allData = results.flatMap(r => r.data || []);
+
+        // Stats (contractType, districts, guarantees, pcf, readjustments) apenas do mês atual
+        const currentMonthData = allData.filter(item =>
+            item.dteStart && item.dteStart >= currentStart && item.dteStart <= currentEnd
+        );
+        const formattedData = transformData(currentMonthData);
+
+        // Últimos 6 meses: do mais antigo ao mais recente
+        const lastMonths = [];
+        for (let i = 5; i >= 0; i--) {
+            const d = new Date(currentYear, currentMonth - i, 1);
+            const monthKey = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+            const contractsAmount = allData.filter(item =>
+                item.dteStart && item.dteStart.slice(0, 7) === monthKey
+            ).length;
+            lastMonths.push({ month: MONTH_NAMES_PT[d.getMonth()], contractsAmount });
+        }
+
+        res.json({ ...formattedData, lastMonths });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+const transformData = (data) => {
+    const guaranteesMap = new Map();
+    const districtsMap = new Map();
+    const contractTypeMap = new Map();
+    const valueByTypeMap = new Map();
+    let totalValue = 0;
+    data.forEach((item) => {
+        const guarantee = item.guarantee?.type;
+        const contract = item.chrContractType;
+        const district = item.chrAddressDistrict;
+        if (guarantee) {
+            guaranteesMap.set(guarantee, (guaranteesMap.get(guarantee) ?? 0) + 1);
+        }
+        if (contract) {
+            contractTypeMap.set(contract, (contractTypeMap.get(contract) ?? 0) + 1);
+        }
+        if (district) {
+            districtsMap.set(district, (districtsMap.get(district) ?? 0) + 1);
+        }
+
+        const netValue = netRentValue(item);
+        totalValue += netValue;
+        if (contract) {
+            valueByTypeMap.set(contract, (valueByTypeMap.get(contract) ?? 0) + netValue);
+        }
+    });
+
+    const pcfResult = data.reduce(
+        (acc, item) => {
+            if (item.pcf?.subscribed === true) {
+                acc.ACTIVE++;
+            } else if (item.pcf?.subscribed === false) {
+                acc.INACTIVE++;
+            }
+            return acc;
+        },
+        { ACTIVE: 0, INACTIVE: 0 }
+    );
+
+    const readjustmentResult = data.reduce((acc, item) => {
+        const date = item.dteLastReadjustment;
+        if (!date) return acc;
+
+        const monthKey = date.slice(0, 7);
+
+        acc[monthKey] = (acc[monthKey] ?? 0) + 1;
+        return acc;
+    }, {});
+
+    return {
+        guarantees: Object.fromEntries(guaranteesMap),
+        contractType: Object.fromEntries(contractTypeMap),
+        districts: Object.fromEntries(districtsMap),
+        valuesByContractType: Object.fromEntries(valueByTypeMap),
+        totalValue,
+        data: data,
+        pcf: pcfResult,
+        readjustments: readjustmentResult
+    }
+}
+
+const getTerminatedContractReport = async (req, res) => {
+    try {
+        const body = { ...req.body, chrStatus: ['TERMINATED'], page: 1 };
+        const token = await getProperfyToken();
+        if (!token) {
+            return res.status(401).json({ error: 'Login inválido na Properfy' });
+        }
+
+        const firstResponse = await fetch('https://adm.baggioimoveis.com.br/api/rental/contract/report/list', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+        });
+        const firstResult = await firstResponse.json();
+        const lastPage = firstResult.last_page || 1;
+
+        const requests = [];
+        for (let page = 1; page <= lastPage; page++) {
+            const pageBody = { ...req.body, chrStatus: ['TERMINATED'], page };
+            requests.push(
+                fetch('https://adm.baggioimoveis.com.br/api/rental/contract/report/list', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(pageBody)
+                }).then(res => res.json())
+            );
+        }
+
+        const results = await Promise.all(requests);
+        const allData = results.flatMap(r => r.data || []);
+
+        res.json(transformTerminatedData(allData));
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+const transformTerminatedData = (data) => {
+    const terminationReasonMap = new Map();
+    const guaranteesMap = new Map();
+    const contractTypeMap = new Map();
+
+    data.forEach((item) => {
+        const reason = item.chrTerminationReason;
+        if (reason) {
+            terminationReasonMap.set(reason, (terminationReasonMap.get(reason) ?? 0) + 1);
+        }
+
+        const guarantee = item.guarantee?.type;
+        if (guarantee) {
+            guaranteesMap.set(guarantee, (guaranteesMap.get(guarantee) ?? 0) + 1);
+        }
+
+        const contractType = item.chrContractType;
+        if (contractType) {
+            contractTypeMap.set(contractType, (contractTypeMap.get(contractType) ?? 0) + 1);
+        }
+    });
+
+    return {
+        terminationReasons: Object.fromEntries(terminationReasonMap),
+        guarantees: Object.fromEntries(guaranteesMap),
+        contractType: Object.fromEntries(contractTypeMap),
+        data,
+    };
+};
+
+const getRemovedPropertyReport = async (req, res) => {
+    try {
+        const body = { ...req.body, page: 1 };
+        const token = await getProperfyToken();
+        if (!token) {
+            return res.status(401).json({ error: 'Login inválido na Properfy' });
+        }
+
+        const firstResponse = await fetch('https://adm.baggioimoveis.com.br/api/property/property/report/list', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+        });
+        const firstResult = await firstResponse.json();
+        const lastPage = firstResult.last_page || 1;
+
+        const requests = [];
+        for (let page = 1; page <= lastPage; page++) {
+            const pageBody = { ...req.body, page };
+            requests.push(
+                fetch('https://adm.baggioimoveis.com.br/api/property/property/report/list', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(pageBody)
+                }).then(res => res.json())
+            );
+        }
+
+        const results = await Promise.all(requests);
+        const allData = results.flatMap(r => r.data || []);
+
+        res.json(transformRemovedData(allData));
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+const transformRemovedData = (data) => {
+    const statusMap = new Map();
+    const terminationReasonMap = new Map();
+    const purposesMap = new Map();
+
+    data.forEach((item) => {
+        const status = item.chrTransactionType;
+        if (status) {
+            statusMap.set(status, (statusMap.get(status) ?? 0) + 1);
+        }
+
+        const reason = item.enlistment?.chrTerminationReason;
+        if (reason) {
+            terminationReasonMap.set(reason, (terminationReasonMap.get(reason) ?? 0) + 1);
+        }
+
+        const purpose = item.chrPurpose;
+        if (purpose) {
+            const entry = purposesMap.get(purpose) || { amount: 0, value: 0 };
+            entry.amount++;
+            entry.value += Number(item.dcmRentRawValue) || 0;
+            purposesMap.set(purpose, entry);
+        }
+    });
+
+    const purposes = Object.fromEntries(purposesMap);
+    purposes.TOTAL = Object.values(purposes).reduce(
+        (acc, p) => ({ amount: acc.amount + p.amount, value: acc.value + p.value }),
+        { amount: 0, value: 0 }
+    );
+
+    return {
+        status: Object.fromEntries(statusMap),
+        terminationReasons: Object.fromEntries(terminationReasonMap),
+        purposes,
+        data,
+    };
+};
+
+const getAdvertisedPropertyReport = async (req, res) => {
+    try {
+        const token = await getProperfyToken();
+        if (!token) {
+            return res.status(401).json({ error: 'Login inválido na Properfy' });
+        }
+
+        const now = new Date();
+        const m = Number(req.body?.month) || now.getMonth() + 1;
+        const y = Number(req.body?.year) || now.getFullYear();
+        const [, currentEnd] = monthRange(m, y);
+        const sixMonthsAgo = new Date(y, m - 6, 1);
+        const start = `${sixMonthsAgo.getFullYear()}-${pad(sixMonthsAgo.getMonth() + 1)}-01`;
+
+        const allData = await fetchAllPages(token, '/api/property/property/report/list', {
+            activeContract: [],
+            chrStatus: ['LISTED'],
+            dteNewListing: [start, currentEnd],
+        });
+
+        const rawValue = (item) => Number(item.dcmRentRawValue) || 0;
+        const byPublicationMonth = (monthKey) => allData.filter(item =>
+            item.dtePublication && item.dtePublication.slice(0, 7) === monthKey
+        );
+
+        const lastMonths = [];
+        for (let i = 5; i >= 0; i--) {
+            const d = new Date(y, m - 1 - i, 1);
+            const monthData = byPublicationMonth(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`);
+            lastMonths.push({
+                month: MONTH_NAMES_PT[d.getMonth()],
+                contractsAmount: monthData.length,
+                value: monthData.reduce((acc, item) => acc + rawValue(item), 0),
+            });
+        }
+
+        // "Divulgado no mês": somente o mês selecionado
+        const selectedMonthData = byPublicationMonth(`${y}-${pad(m)}`);
+
+        const purposesMap = new Map();
+        selectedMonthData.forEach(item => {
+            const purpose = item.chrPurpose;
+            if (!purpose) return;
+            const entry = purposesMap.get(purpose) || { amount: 0, value: 0 };
+            entry.amount++;
+            entry.value += rawValue(item);
+            purposesMap.set(purpose, entry);
+        });
+        const purposes = Object.fromEntries(purposesMap);
+
+        purposes.TOTAL = Object.values(purposes).reduce(
+            (acc, p) => ({ amount: acc.amount + p.amount, value: acc.value + p.value }),
+            { amount: 0, value: 0 }
+        );
+
+        res.json({ lastMonths, purposes });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+const getRentalContractOptions = async (req, res) => {
+    try {
+        const token = await getProperfyToken();
+        if (!token) {
+            return res.status(401).json({ error: 'Login inválido na Properfy' });
+        }
+
+        const response = await fetch('https://adm.baggioimoveis.com.br/api/rental/contract/options', {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+const getActiveContractSummary = async (req, res) => {
+    try {
+        const token = await getProperfyToken();
+        if (!token) return res.status(401).json({ error: 'Login inválido na Properfy' });
+
+        const { month, year } = req.body;
+        const [start, end] = monthRange(Number(month), Number(year));
+
+        const data = await fetchAllPages(token, '/api/rental/contract/report/list', {
+            chrStatus: ['REGULAR'],
+            dteStart: [start, end],
+        });
+
+        const { data: _omit, districts: _omitDistricts, readjustments: _omitReadjustments, ...stats } = transformData(data);
+        res.json({ ...stats, count: data.length });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+const getActiveContractTimeseries = async (req, res) => {
+    try {
+        const token = await getProperfyToken();
+        if (!token) return res.status(401).json({ error: 'Login inválido na Properfy' });
+
+        const { month, year } = req.body;
+        const m = Number(month);
+        const y = Number(year);
+        const [, currentEnd] = monthRange(m, y);
+        const sixMonthsAgo = new Date(y, m - 6, 1);
+        const start = `${sixMonthsAgo.getFullYear()}-${pad(sixMonthsAgo.getMonth() + 1)}-01`;
+
+        const [contractsData, readjustmentsData] = await Promise.all([
+            fetchAllPages(token, '/api/rental/contract/report/list', {
+                chrStatus: ['REGULAR'],
+                dteStart: [start, currentEnd],
+            }),
+            fetchAllPages(token, '/api/rental/contract/report/list', {
+                chrStatus: ['REGULAR'],
+                dteLastReadjustment: [start, currentEnd],
+            }),
+        ]);
+
+        const lastMonths = [];
+        for (let i = 5; i >= 0; i--) {
+            const d = new Date(y, m - 1 - i, 1);
+            const monthKey = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+            const contractsAmount = contractsData.filter(item =>
+                item.dteStart && item.dteStart.slice(0, 7) === monthKey
+            ).length;
+            const monthReadjustments = readjustmentsData.filter(item =>
+                item.dteLastReadjustment && item.dteLastReadjustment.slice(0, 7) === monthKey
+            );
+            const readjustmentsValue = monthReadjustments.reduce((acc, item) => acc + netRentValue(item), 0);
+            lastMonths.push({
+                month: MONTH_NAMES_PT[d.getMonth()],
+                contractsAmount,
+                readjustments: monthReadjustments.length,
+                readjustmentsValue,
+            });
+        }
+        res.json({ lastMonths });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+const getTerminatedTimeseries = async (req, res) => {
+    try {
+        const token = await getProperfyToken();
+        if (!token) return res.status(401).json({ error: 'Login inválido na Properfy' });
+
+        const { month, year } = req.body;
+        const m = Number(month);
+        const y = Number(year);
+        const [, currentEnd] = monthRange(m, y);
+        const sixMonthsAgo = new Date(y, m - 6, 1);
+        const start = `${sixMonthsAgo.getFullYear()}-${pad(sixMonthsAgo.getMonth() + 1)}-01`;
+
+        const data = await fetchAllPages(token, '/api/rental/contract/report/list', {
+            chrStatus: ['TERMINATED'],
+            dteTerminationEnd: [start, currentEnd],
+        });
+
+        const lastMonths = [];
+        for (let i = 5; i >= 0; i--) {
+            const d = new Date(y, m - 1 - i, 1);
+            const monthKey = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+            const monthData = data.filter(item =>
+                item.dteTerminationEnd && item.dteTerminationEnd.slice(0, 7) === monthKey
+            );
+            const value = monthData.reduce((acc, item) => acc + netRentValue(item), 0);
+            lastMonths.push({
+                month: MONTH_NAMES_PT[d.getMonth()],
+                count: monthData.length,
+                value,
+            });
+        }
+        res.json({ lastMonths });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+const getTerminatedContractCount = async (req, res) => {
+    try {
+        const token = await getProperfyToken();
+        if (!token) return res.status(401).json({ error: 'Login inválido na Properfy' });
+
+        const { month, year } = req.body;
+        const [start, end] = monthRange(Number(month), Number(year));
+
+        const count = await fetchTotal(token, '/api/rental/contract/report/list', {
+            chrStatus: ['TERMINATED'],
+            dteTerminationEnd: [start, end],
+        });
+        res.json({ count });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+const getRemovedTimeseries = async (req, res) => {
+    try {
+        const token = await getProperfyToken();
+        if (!token) return res.status(401).json({ error: 'Login inválido na Properfy' });
+
+        const { month, year } = req.body;
+        const m = Number(month);
+        const y = Number(year);
+        const [, currentEnd] = monthRange(m, y);
+        const sixMonthsAgo = new Date(y, m - 6, 1);
+        const start = `${sixMonthsAgo.getFullYear()}-${pad(sixMonthsAgo.getMonth() + 1)}-01`;
+
+        const data = await fetchAllPages(token, '/api/property/property/report/list', {
+            activeContract: ['INACTIVE'],
+            chrStatus: ['REMOVED'],
+            dteTermination: [start, currentEnd],
+        });
+
+        const lastMonths = [];
+        for (let i = 5; i >= 0; i--) {
+            const d = new Date(y, m - 1 - i, 1);
+            const monthKey = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+            const monthData = data.filter(item => {
+                const date = item.enlistment?.dteTermination;
+                return date && date.slice(0, 7) === monthKey;
+            });
+            // Mesmo critério do card "Baixados no mês" (transformRemovedData): valor bruto
+            const value = monthData.reduce((acc, item) => acc + (Number(item.dcmRentRawValue) || 0), 0);
+            lastMonths.push({
+                month: MONTH_NAMES_PT[d.getMonth()],
+                count: monthData.length,
+                value,
+            });
+        }
+        res.json({ lastMonths });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+const getActivePropertyCount = async (req, res) => {
+    try {
+        const token = await getProperfyToken();
+        if (!token) return res.status(401).json({ error: 'Login inválido na Properfy' });
+
+        const count = await fetchTotal(token, '/api/property/property/report/list', {
+            activeContract: ['ACTIVE'],
+        });
+        res.json({ count });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+const MIN_CONTRACT_DATE = '1990-01-01';
+
+const toIsoDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+// Contratos vigentes no último dia do mês/ano informado:
+// REGULAR iniciados até o fim do mês + TERMINATED iniciados até o fim do mês
+// e rescindidos depois dele (ainda estavam ativos naquela data).
+const getActiveContractCountUntil = async (req, res) => {
+    try {
+        const token = await getProperfyToken();
+        if (!token) return res.status(401).json({ error: 'Login inválido na Properfy' });
+
+        const now = new Date();
+        const m = Number(req.body?.month) || now.getMonth() + 1;
+        const y = Number(req.body?.year) || now.getFullYear();
+        const [, end] = monthRange(m, y);
+
+        const [ey, em, ed] = end.split('-').map(Number);
+        const dayAfterEnd = toIsoDate(new Date(ey, em - 1, ed + 1));
+        const today = toIsoDate(now);
+
+        const path = '/api/rental/contract/report/list';
+        const [regular, terminatedLater] = await Promise.all([
+            fetchTotal(token, path, {
+                chrStatus: ['REGULAR'],
+                dteStart: [MIN_CONTRACT_DATE, end],
+            }),
+            dayAfterEnd <= today
+                ? fetchTotal(token, path, {
+                    chrStatus: ['TERMINATED'],
+                    dteStart: [MIN_CONTRACT_DATE, end],
+                    dteTerminationEnd: [dayAfterEnd, today],
+                })
+                : 0,
+        ]);
+
+        res.json({ count: regular + terminatedLater });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+module.exports = {
+    getActiveContractCountUntil,
+    getPropertyReportList,
+    getTerminatedContractReport,
+    getRemovedPropertyReport,
+    getRentalContractOptions,
+    getAdvertisedPropertyReport,
+    getActiveContractSummary,
+    getActiveContractTimeseries,
+    getTerminatedContractCount,
+    getActivePropertyCount,
+    getTerminatedTimeseries,
+    getRemovedTimeseries,
+};

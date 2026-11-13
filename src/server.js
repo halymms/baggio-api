@@ -7,6 +7,7 @@ const userRoutes = require('./routes/userRoutes');
 const authRoutes = require('./routes/authRoutes');
 const logger = require('./middlewares/logger');
 const properfyRoutes = require('./routes/properfyRoutes');
+const propertyRoutes = require('./routes/propertyRoutes');
 const port = process.env.PORT || 4000;
 
 const corsOptions = process.env.FRONTEND_URL
@@ -25,6 +26,7 @@ app.get('/', (request, response) => {
 app.use('/users', userRoutes);
 app.use('/auth', authRoutes);
 app.use('/api', properfyRoutes);
+app.use('/api', propertyRoutes);
 
 app.use((req, res, next) => {
   res.status(404).json({ error: 'Rota não encontrada' });
