@@ -11,6 +11,7 @@ const {
     getActivePropertyCount,
     getTerminatedTimeseries,
     getRemovedTimeseries,
+    getActiveContractCountUntil,
 } = require('../controllers/propertyController');
 const router = express.Router();
 
@@ -22,6 +23,7 @@ router.post('/property/property/report/advertised', getAdvertisedPropertyReport)
 
 router.post('/rental/contract/active/summary', getActiveContractSummary);
 router.post('/rental/contract/active/timeseries', getActiveContractTimeseries);
+router.post('/rental/contract/active/count', getActiveContractCountUntil);
 router.post('/rental/contract/terminated/count', getTerminatedContractCount);
 router.post('/rental/contract/terminated/timeseries', getTerminatedTimeseries);
 router.post('/property/property/active/count', getActivePropertyCount);
