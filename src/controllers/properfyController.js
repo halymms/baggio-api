@@ -3,7 +3,7 @@ const getProperfyOpenFinancialStatementAllPages = async (req, res) => {
     const body = { ...req.body, page: 1 };
     const token = await getProperfyToken();
     if (!token) {
-      return res.status(401).json({ error: 'Login inválido na Properfy' });
+      return res.status(502).json({ error: 'Login inválido na Properfy' });
     }
 
     // Busca a primeira página para descobrir o total de páginas
@@ -46,7 +46,7 @@ const getProperfyOpenFinancialStatement = async (req, res) => {
     const body = req.body;
     const token = await getProperfyToken();
     if (!token) {
-      return res.status(401).json({ error: 'Login inválido na Properfy' });
+      return res.status(502).json({ error: 'Login inválido na Properfy' });
     }
     const response = await fetch('https://adm.baggioimoveis.com.br/api/property/financial-statement/open-fs', {
       method: 'POST',
@@ -62,12 +62,72 @@ const getProperfyOpenFinancialStatement = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+const getProperfyOpenFinancialStatementDelinquency = async (req, res) => {
+  try {
+    const token = await getProperfyToken();
+    if (!token) {
+      return res.status(502).json({ error: 'Login inválido na Properfy' });
+    }
+
+    const { month, year, page = 1, size = 50, ...extra } = req.body || {};
+    const parsedMonth = Number.isNaN(Number(month)) ? new Date().getMonth() : Number(month);
+    const parsedYear = Number.isNaN(Number(year)) ? new Date().getFullYear() : Number(year);
+    const normalizedMonth = Math.max(0, Math.min(11, parsedMonth));
+    const normalizedYear = Math.max(1900, parsedYear);
+    const startDate = new Date(Date.UTC(normalizedYear, normalizedMonth, 1, 0, 0, 0));
+    const endDate = new Date(Date.UTC(normalizedYear, normalizedMonth + 1, 0, 23, 59, 59));
+
+    const body = {
+      fkRenter: 0,
+      chrType: [],
+      chrStatus: [],
+      chrFinancialStatus: [],
+      chrFsStatus: [
+        'PENDING_CHARGE_CREATION',
+        'PENDING_REMITTANCE',
+        'PENDING_RETURN',
+        'GENERATING_BANKSLIP',
+        'REGISTERED',
+        'RETAINED_DELAYED',
+        'RETAINED_CHARGE_NOT',
+        'RETAINED_STATUS',
+      ],
+      chrChargeMethod: [],
+      fkBankAccount: 0,
+      chrInsurance: [],
+      dteDue: [startDate.toISOString(), endDate.toISOString()],
+      dteDueOwner: [],
+      dteSolved: [],
+      dteSolvedOwner: [],
+      chrAssurance: [],
+      chrOrder: 'NAME',
+      page,
+      size,
+      ...extra,
+    };
+
+    const response = await fetch('https://adm.baggioimoveis.com.br/api/property/financial-statement/open-fs', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 const getProperfyCollectTransaction = async (req, res) => {
   try {
     const { fkWallet, start, end } = req.query;
     const token = await getProperfyToken();
     if (!token) {
-      return res.status(401).json({ error: 'Login inválido na Properfy' });
+      return res.status(502).json({ error: 'Login inválido na Properfy' });
     }
     const url = `https://adm.baggioimoveis.com.br/api/billing/transaction/collect?fkWallet=${fkWallet}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
     const response = await fetch(url, {
@@ -88,8 +148,8 @@ const getProperfyToken = async () => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      vrcEmail: PROPERFY_EMAIL,
-      vrcPass: PROPERFY_PASS
+      vrcEmail: process.env.PPFY_USER,
+      vrcPass: process.env.PPFY_PASS
     }),
   });
   const data = await response.json();
@@ -101,7 +161,7 @@ const getProperfyRealTimeReport = async (req, res) => {
     const { section = null, companies, dteRange } = req.body;
     const token = await getProperfyToken();
     if (!token) {
-      return res.status(401).json({ error: 'Login inválido na Properfy' });
+      return res.status(502).json({ error: 'Login inválido na Properfy' });
     }
     const requestBody = { section, companies, dteRange };
     const response = await fetch('https://adm.baggioimoveis.com.br/api/billing/reports/real-time', {
@@ -144,22 +204,19 @@ const getProperfyRealTimeReport = async (req, res) => {
 };
 const fetch = require('node-fetch');
 
-const PROPERFY_EMAIL = process.env.PPFY_USER;
-const PROPERFY_PASS = process.env.PPFY_PASS;
-
 const properfyLogin = async (req, res) => {
   try {
     const response = await fetch('https://adm.baggioimoveis.com.br/api/auth/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        vrcEmail: PROPERFY_EMAIL,
-        vrcPass: PROPERFY_PASS
+        vrcEmail: process.env.PPFY_USER,
+        vrcPass: process.env.PPFY_PASS
       }),
     });
     const data = await response.json();
     if (!data.token) {
-      return res.status(401).json({ error: 'Login inválido na Properfy' });
+      return res.status(502).json({ error: 'Login inválido na Properfy' });
     }
     res.json({ token: data.token });
   } catch (error) {
@@ -167,4 +224,12 @@ const properfyLogin = async (req, res) => {
   }
 };
 
-module.exports = { properfyLogin, getProperfyRealTimeReport, getProperfyCollectTransaction, getProperfyOpenFinancialStatement, getProperfyOpenFinancialStatementAllPages, getProperfyToken };
+module.exports = {
+  properfyLogin,
+  getProperfyRealTimeReport,
+  getProperfyCollectTransaction,
+  getProperfyOpenFinancialStatement,
+  getProperfyOpenFinancialStatementAllPages,
+  getProperfyOpenFinancialStatementDelinquency,
+  getProperfyToken,
+};

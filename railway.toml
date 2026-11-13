@@ -1,0 +1,12 @@
+[build]
+builder = "RAILPACK"
+
+# Cron mensal de inadimplência: serviço separado com
+# startCommand = "npm run db:sync:inadimplencia"
+# schedule: 0 6 1 * * (dia 1, 03:00 UTC-3)
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
